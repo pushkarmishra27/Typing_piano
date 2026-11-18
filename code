@@ -1,0 +1,428 @@
+import colorsys
+import os
+import time
+import wave
+from collections import deque
+from datetime import datetime
+
+import numpy as np
+import pygame
+from mido import Message, MetaMessage, MidiFile, MidiTrack
+
+SAMPLE_RATE = 44100
+WIDTH = 1000
+HEIGHT = 640
+
+BASE_NOTE = 48      # letters start here
+DIGIT_NOTE = 31     # digits use a lower range so they don't clash with letters
+TOP_NOTE = 91       # highest note a letter can reach
+BASS_NOTE = 36
+
+MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11]
+MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10]
+
+INSTRUMENTS = ["piano", "synth", "bell", "saw", "drum"]
+MIDI_PROGRAM = {"piano": 0, "synth": 80, "bell": 14, "saw": 81, "drum": 117}
+
+SPEED_LIMIT = 3.5   # keys per second needed for major mode
+
+BG = (20, 23, 31)
+PANEL = (29, 33, 43)
+PANEL_LIGHT = (37, 42, 54)
+TEXT = (231, 235, 242)
+MUTED = (143, 153, 170)
+ACCENT = (112, 177, 207)
+GOLD = (220, 185, 116)
+GREEN = (133, 190, 157)
+
+pygame.mixer.pre_init(SAMPLE_RATE, -16, 2, 1024)
+pygame.init()
+pygame.mixer.set_num_channels(64)
+
+waves = {}
+sounds = {}
+
+
+def midi_to_freq(note):
+    return 440.0 * 2 ** ((note - 69) / 12)
+
+
+def make_wave(freq, instrument, duration=0.6):
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
+
+    if instrument == "piano":
+        audio = (np.sin(2 * np.pi * freq * t)
+                 + 0.5 * np.sin(4 * np.pi * freq * t)
+                 + 0.25 * np.sin(6 * np.pi * freq * t))
+        env = np.exp(-4 * t)
+    elif instrument == "synth":
+        audio = np.sign(np.sin(2 * np.pi * freq * t)) * 0.6
+        env = np.exp(-3 * t)
+    elif instrument == "bell":
+        audio = (np.sin(2 * np.pi * freq * t)
+                 + 0.6 * np.sin(2 * np.pi * freq * 2.76 * t)
+                 + 0.4 * np.sin(2 * np.pi * freq * 5.4 * t))
+        env = np.exp(-5 * t)
+    elif instrument == "saw":
+        audio = 2 * ((freq * t) % 1) - 1
+        env = np.exp(-3.5 * t)
+    else:
+        # drum: sine that drops in pitch, plus a bit of noise
+        phase = 2 * np.pi * np.cumsum(freq * 0.5 * np.exp(-t * 15)) / SAMPLE_RATE
+        audio = np.sin(phase) + 0.2 * np.random.uniform(-1, 1, len(t))
+        env = np.exp(-8 * t)
+
+    audio = audio * env
+    audio = audio / (np.max(np.abs(audio)) + 1e-9) * 0.6
+
+    # tiny fade in so there is no click
+    attack = int(0.005 * SAMPLE_RATE)
+    audio[:attack] *= np.linspace(0, 1, attack)
+
+    return audio.astype(np.float32)
+
+
+def add_note(note, instrument):
+    audio = make_wave(midi_to_freq(note), instrument)
+    stereo = np.column_stack((audio, audio))
+    waves[(note, instrument)] = audio
+    sounds[(note, instrument)] = pygame.sndarray.make_sound((stereo * 32767).astype(np.int16))
+
+
+def build_sounds():
+    # generate everything once at startup so the first key press isn't slow
+    for instrument in INSTRUMENTS:
+        for note in range(DIGIT_NOTE, TOP_NOTE + 1):
+            add_note(note, instrument)
+
+
+def play_note(note, instrument):
+    if (note, instrument) not in sounds:
+        add_note(note, instrument)
+    sounds[(note, instrument)].play()
+
+
+def key_to_note(char, scale):
+    char = char.lower()
+    if char.isdigit():
+        index = int(char)
+        base = DIGIT_NOTE
+    else:
+        index = ord(char) - ord("a")
+        base = BASE_NOTE
+
+    octave, degree = divmod(index, len(scale))
+    return base + octave * 12 + scale[degree]
+
+
+def count_recent(times, now, seconds):
+    count = 0
+    for t in reversed(times):
+        if now - t >= seconds:
+            break
+        count += 1
+    return count
+
+
+def rhythm_score(times):
+    if len(times) < 4:
+        return 0
+
+    gaps = np.diff(np.array(times))
+    gaps = gaps[gaps < 1.5]      # ignore long pauses
+    if len(gaps) < 3:
+        return 0
+
+    variation = np.std(gaps) / (np.mean(gaps) + 1e-9)
+    return int(max(0, min(100, 100 - variation * 50)))
+
+
+def save_midi(events, path):
+    midi = MidiFile(ticks_per_beat=480)
+    track = MidiTrack()
+    midi.tracks.append(track)
+    track.append(MetaMessage("set_tempo", tempo=500000, time=0))
+
+    # every instrument gets its own channel
+    for instrument in sorted({e[2] for e in events}, key=INSTRUMENTS.index):
+        track.append(Message("program_change",
+                             program=MIDI_PROGRAM[instrument],
+                             channel=INSTRUMENTS.index(instrument),
+                             time=0))
+
+    messages = []
+    for timestamp, note, instrument in events:
+        tick = int(timestamp * 960)    # 480 ticks per beat, 2 beats per second
+        channel = INSTRUMENTS.index(instrument)
+        messages.append((tick, Message("note_on", note=note, velocity=90, channel=channel)))
+        messages.append((tick + 300, Message("note_off", note=note, velocity=0, channel=channel)))
+
+    messages.sort(key=lambda m: m[0])
+
+    last_tick = 0
+    for tick, msg in messages:
+        track.append(msg.copy(time=tick - last_tick))
+        last_tick = tick
+
+    midi.save(path)
+
+
+def save_wav(events, path):
+    total = int((max(e[0] for e in events) + 1.5) * SAMPLE_RATE)
+    mix = np.zeros(total)
+
+    for timestamp, note, instrument in events:
+        if (note, instrument) not in waves:
+            add_note(note, instrument)
+        audio = waves[(note, instrument)]
+
+        start = int(timestamp * SAMPLE_RATE)
+        length = min(len(audio), total - start)
+        if length > 0:
+            mix[start:start + length] += audio[:length]
+
+    mix = mix / (np.max(np.abs(mix)) + 1e-9) * 0.9
+
+    with wave.open(path, "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(SAMPLE_RATE)
+        f.writeframes((mix * 32767).astype(np.int16).tobytes())
+
+
+def save_song(events):
+    if not events:
+        return None
+
+    os.makedirs("songs", exist_ok=True)
+    name = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    try:
+        save_midi(events, f"songs/session_{name}.mid")
+        save_wav(events, f"songs/session_{name}.wav")
+    except OSError as e:
+        print("Could not save:", e)
+        return None
+
+    return f"songs/session_{name}.wav"
+
+
+def draw_text(screen, text, font, color, pos):
+    screen.blit(font.render(text, True, color), pos)
+
+
+def draw_panel(screen, rect):
+    pygame.draw.rect(screen, PANEL, rect, border_radius=10)
+
+
+def draw_bars(screen, bars):
+    for bar in bars:
+        bar["y"] += 2
+        bar["life"] -= 2.5
+
+    bars[:] = [b for b in bars if b["life"] > 0 and b["y"] < 375]
+
+    for bar in bars:
+        height = max(2, int(bar["life"] / 255 * 55))
+        pygame.draw.rect(screen, bar["color"], (bar["x"], int(bar["y"]), 5, height), border_radius=3)
+
+
+class Session:
+    def __init__(self):
+        self.instrument = "piano"
+        self.events = []
+        self.presses = deque()                # last 10 seconds
+        self.rhythm_presses = deque(maxlen=20)  # last 20 key presses
+        self.bars = []
+        self.typed = ""
+        self.key_count = 0
+        self.start_time = None
+        self.message = ""
+        self.message_until = 0
+
+    def show_message(self, text, now, seconds=2):
+        self.message = text
+        self.message_until = now + seconds
+
+    def press(self, char, now):
+        if self.start_time is None:
+            self.start_time = now
+
+        speed = count_recent(self.presses, now, 3) / 3
+        scale = MAJOR_SCALE if speed >= SPEED_LIMIT else MINOR_SCALE
+
+        note = key_to_note(char, scale)
+        timestamp = now - self.start_time
+
+        play_note(note, self.instrument)
+        self.events.append((timestamp, note, self.instrument))
+
+        self.presses.append(now)
+        self.rhythm_presses.append(now)
+        self.key_count += 1
+        self.typed = (self.typed + char)[-40:]
+
+        # bass note every 8th key
+        if self.key_count % 8 == 0:
+            play_note(BASS_NOTE, "piano")
+            self.events.append((timestamp, BASS_NOTE, "piano"))
+
+        pos = (note - DIGIT_NOTE) / (TOP_NOTE - DIGIT_NOTE)
+        rgb = tuple(int(v * 255) for v in colorsys.hsv_to_rgb(pos, 0.45, 0.85))
+
+        self.bars.append({
+            "x": int(pos * (WIDTH - 60)) + 30,
+            "y": 250,
+            "color": rgb,
+            "life": 255,
+        })
+
+
+def draw_screen(screen, fonts, s, now, speed, wpm, score):
+    title, heading, body, small = fonts
+
+    screen.fill(BG)
+
+    draw_text(screen, "Typing Rhythm Piano", title, TEXT, (28, 20))
+    draw_text(screen, "A musical interpretation of your typing", small, MUTED, (30, 61))
+
+    # status bar
+    draw_panel(screen, (28, 98, 944, 56))
+
+    if speed == 0:
+        mood = "Idle"
+    elif speed >= SPEED_LIMIT:
+        mood = "Major"
+    else:
+        mood = "Minor"
+
+    status = "Recording" if s.key_count > 0 else "Waiting for input"
+
+    draw_text(screen, "CURRENT INSTRUMENT", small, MUTED, (46, 107))
+    draw_text(screen, s.instrument.capitalize(), heading, ACCENT, (46, 126))
+    draw_text(screen, "MUSICAL MODE", small, MUTED, (350, 107))
+    draw_text(screen, mood, heading, GOLD, (350, 126))
+    draw_text(screen, "INPUT STATUS", small, MUTED, (675, 107))
+    draw_text(screen, status, heading, GREEN, (675, 126))
+
+    # visualizer
+    draw_panel(screen, (28, 170, 944, 270))
+    draw_text(screen, "LIVE PERFORMANCE", heading, TEXT, (48, 188))
+    draw_text(screen, "Your keystrokes translated into sound", small, MUTED, (48, 215))
+
+    for i in range(1, 5):
+        y = 245 + i * 37
+        pygame.draw.line(screen, PANEL_LIGHT, (48, y), (952, y), 1)
+
+    draw_bars(screen, s.bars)
+
+    # recent input
+    draw_panel(screen, (28, 454, 944, 66))
+    draw_text(screen, "RECENT INPUT", small, MUTED, (47, 463))
+    draw_text(screen, s.typed or "Start typing to create your melody...", body, TEXT, (47, 484))
+
+    # stats
+    elapsed = int(now - s.start_time) if s.start_time else 0
+    stats = [
+        ("KEYS PLAYED", str(s.key_count), ACCENT),
+        ("TYPING SPEED", f"{wpm} WPM", GOLD),
+        ("RHYTHM SCORE", f"{score} / 100", GREEN),
+        ("SESSION TIME", f"{elapsed // 60:02d}:{elapsed % 60:02d}", TEXT),
+    ]
+
+    for i, (label, value, color) in enumerate(stats):
+        x = 28 + i * 240
+        draw_panel(screen, (x, 534, 224, 76))
+        draw_text(screen, label, small, MUTED, (x + 15, 544))
+        draw_text(screen, value, heading, color, (x + 15, 570))
+
+    draw_text(screen, "F1-F5  Instruments     F6  Save session     ESC  Save and exit",
+              small, MUTED, (30, 618))
+
+    if now < s.message_until:
+        draw_text(screen, s.message, small, GOLD, (690, 618))
+
+    pygame.display.flip()
+
+
+def main():
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Typing Rhythm Piano")
+    clock = pygame.time.Clock()
+
+    names = "segoeui,arial,helveticaneue,dejavusans"
+    fonts = (
+        pygame.font.SysFont(names, 31, bold=True),
+        pygame.font.SysFont(names, 18, bold=True),
+        pygame.font.SysFont(names, 16),
+        pygame.font.SysFont(names, 13),
+    )
+
+    screen.fill(BG)
+    draw_text(screen, "Loading sounds...", fonts[2], MUTED, (30, 30))
+    pygame.display.flip()
+    build_sounds()
+
+    f_keys = [pygame.K_F1, pygame.K_F2, pygame.K_F3, pygame.K_F4, pygame.K_F5]
+
+    s = Session()
+    score = 0
+    running = True
+
+    pygame.key.start_text_input()
+    print("Typing Rhythm Piano started. Click the window and type.")
+
+    while running:
+        now = time.time()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                pygame.key.start_text_input()
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+
+                elif event.key in f_keys:
+                    s.instrument = INSTRUMENTS[f_keys.index(event.key)]
+                    s.show_message("Instrument: " + s.instrument.capitalize(), now)
+
+                elif event.key == pygame.K_F6:
+                    if not s.events:
+                        s.show_message("No notes to save yet", now, 3)
+                    elif save_song(s.events):
+                        s.show_message("Session saved", now, 3)
+                    else:
+                        s.show_message("Could not save", now, 3)
+
+                elif event.unicode and event.unicode.isascii() and event.unicode.isalnum():
+                    s.press(event.unicode, now)
+
+        # throw away presses older than 10 seconds
+        while s.presses and now - s.presses[0] >= 10:
+            s.presses.popleft()
+
+        wpm = int(count_recent(s.presses, now, 10) / 5 * 6)
+        speed = count_recent(s.presses, now, 3) / 3
+        score = rhythm_score(s.rhythm_presses)
+
+        draw_screen(screen, fonts, s, now, speed, wpm, score)
+        clock.tick(60)
+
+    path = save_song(s.events)
+
+    pygame.key.stop_text_input()
+    pygame.quit()
+
+    print("Session finished.")
+    print("Keys played:", s.key_count)
+    print("Rhythm score:", score)
+    if path:
+        print("Saved:", path)
+
+
+if __name__ == "__main__":
+    main()
