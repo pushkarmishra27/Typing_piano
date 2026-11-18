@@ -1,104 +1,177 @@
-<div align="center">
-🎹 Typing Rhythm Piano
+# 🎹 Typing Rhythm Piano
 
-A Python music app that turns your keyboard typing into a song, with a live Pygame visualizer
+**Typing Rhythm Piano** is a small Python project that turns keyboard typing into music. Every time you press a letter or number, the app plays a musical note and displays it in a live visualizer.
 
-Python Pygame NumPy Show Image Show Image
+I built this project to experiment with Python, sound generation and Pygame. One interesting part is that the music changes depending on how quickly you type. Faster typing creates a brighter sound, while slower typing gives the music a calmer feel.
 
-</div>
-📖 Overview
+You can also change instruments while typing and save your session as MIDI or WAV files.
 
-Typing Rhythm Piano is a desktop application that turns every key you press into a musical note. The way you type shapes the music: type fast and the song becomes bright and happy, type slowly and it turns calm and moody. When you finish, your session is saved as a real MIDI file and a WAV file that you can play anywhere.
+## 📸 Screenshots
 
-It is built to demonstrate Python programming, sound synthesis with NumPy, event-driven GUI development with Pygame, and file handling with MIDI and WAV formats.
+Screenshots will be added soon.
 
-🖼️ Screenshots
-<!-- Add screenshots here once available. Suggested layout: | Idle Screen | Live Performance | |-------------|------------------| | ![Idle](assets/screenshots/idle.png) | ![Live](assets/screenshots/live.png) | A short GIF of typing and the colorful bars falling works even better than static images. -->
+## ✨ Features
 
-Screenshots coming soon. See the Getting Started section to run it yourself in the meantime.
+### Typing and music
+- Press any letter from A to Z to play a note.
+- Numbers from 0 to 9 play lower notes.
+- Notes are generated using NumPy, so no external sound files are required.
+- The app responds to keyboard input in real time.
 
-✨ Features
-⌨️ Typing to Music
-Every letter a-z plays a melody note
-Every digit 0-9 plays a lower note, so digits never clash with letters
-All notes are generated live with NumPy (no audio files needed)
-🎼 Smart Musical Mood
-Fast typing (3.5+ keys per second) switches to a bright major scale
-Slower typing uses a moody minor scale
-A bass note is added automatically on every 8th key
-🎛️ Instruments
-5 built-in instruments: Piano, Synth, Bell, Saw and Drum
-Switch instrument any time with F1 to F5
-📊 Live Dashboard
-Colorful falling bars for every note you play
-Recent input display
-Live stats: keys played, typing speed (WPM), rhythm score and session time
-💾 Export
-Save your session as a .mid file (opens in any music software)
-Save your session as a .wav file (plays in any media player)
-🎮 Controls
-Key	Action
-a-z, 0-9	Play notes
-F1	Piano
-F2	Synth
-F3	Bell
-F4	Saw
-F5	Drum
-F6	Save session
-ESC	Save and exit
-🛠️ Tech Stack
-Layer	Technology
-Language	Python
-GUI and Sound Playback	Pygame
-Sound Synthesis	NumPy
-MIDI Export	Mido
-WAV Export	wave (built-in)
-Other	colorsys, collections, datetime, time, os
-📁 Project Structure
-text
+### Music changes with typing speed
+- When you type at around 3.5 keys per second or faster, the app switches to a major scale.
+- Slower typing uses a minor scale.
+- A bass note plays after every 8 key presses.
+
+### Instruments
+
+There are five instruments available:
+
+- Piano
+- Synth
+- Bell
+- Saw
+- Drum
+
+You can switch between them using the F1 to F5 keys.
+
+### Live display
+
+The application also has a visualizer that shows the notes as you type.
+
+It displays:
+- Falling bars for played notes.
+- Recently pressed keys.
+- Total keys pressed.
+- Typing speed (WPM).
+- Rhythm score.
+- Time spent in the session.
+
+### Saving music
+
+Once you're done typing, you can save your session in two formats:
+
+- **MIDI (.mid):** Useful if you want to open or edit the music in a music production application.
+- **WAV (.wav):** An audio file that you can play using a regular media player.
+
+## 🎮 Keyboard Controls
+
+| Key | Action |
+|---|---|
+| A–Z | Play musical notes |
+| 0–9 | Play lower notes |
+| F1 | Piano |
+| F2 | Synth |
+| F3 | Bell |
+| F4 | Saw |
+| F5 | Drum |
+| F6 | Save current session |
+| ESC | Save and close the application |
+
+## 🛠️ Technologies Used
+
+| Technology | Purpose |
+|---|---|
+| Python | Main programming language |
+| Pygame | Window, graphics and sound playback |
+| NumPy | Generating musical sounds |
+| Mido | Creating MIDI files |
+| wave | Saving audio as WAV |
+| colorsys | Colour-related calculations |
+| datetime, time, os | Time and file handling |
+
+## 📁 Project Structure
+
+```text
 typing-rhythm-piano/
-├── typing_piano.py     # Main application (sound, GUI and export)
-├── requirements.txt    # Python dependencies
-├── README.md           # Project documentation
-├── LICENSE             # MIT License
-├── .gitignore          # Files Git should ignore
-└── songs/              # Saved sessions (created automatically)
-🚀 Getting Started
-Prerequisites
-Python 3.8+
-A speaker or headphones
-1. Clone the repository
-bash
+│
+├── typing_piano.py
+├── requirements.txt
+├── README.md
+├── LICENSE
+├── .gitignore
+│
+└── songs/
+    └── Saved MIDI and WAV files
+```
+
+The `songs` folder is created automatically when the application saves a session.
+
+## 🚀 How to Run
+
+### Requirements
+
+Before running the project, make sure you have:
+
+- Python 3.8 or above
+- A working speaker or headphones
+- The required Python libraries installed
+
+### 1. Download the project
+
+```bash
 git clone https://github.com/<your-username>/typing-rhythm-piano.git
+```
+
+Move into the project folder:
+
+```bash
 cd typing-rhythm-piano
-2. Install dependencies
-bash
+```
+
+### 2. Install the required libraries
+
+```bash
 pip install -r requirements.txt
-3. Run the app
-bash
+```
+
+### 3. Start the application
+
+```bash
 python typing_piano.py
+```
 
-Click the window, then start typing. Your saved sessions appear in the songs/ folder as session_YYYYMMDD_HHMMSS.mid and .wav.
+Once the window opens, click inside it and start typing.
 
-🧠 How It Works
-Sound generation: each note is synthesized with NumPy using sine, square or saw waves and a decay envelope, then played with pygame.mixer.
-Note mapping: every key maps to a position on a musical scale, so the same key always gives the same note in the same mode.
-Mood detection: the app counts the keys pressed in the last 3 seconds to choose between major and minor.
-Rhythm score: calculated from how even the gaps are between your last 20 key presses. A steadier rhythm gives a higher score.
-Export: events are written to a MIDI file with Mido and mixed down into a WAV file.
-🗺️ Roadmap / Future Improvements
-[ ] Map space and backspace to drum hits
-[ ] Choose scale and key from a menu
-[ ] Faster startup by loading instruments in the background
-[ ] Record and replay mode
-[ ] Support for symbols and punctuation keys
-[ ] Make WAV and MIDI note lengths match exactly
-🤝 Contributing
+Your saved music files will be available in the `songs` folder.
 
-This started as a college project, but suggestions and pull requests are welcome. Feel free to open an issue if you spot a bug or have an idea for improvement.
+## ⚙️ How It Works
 
-📄 License
+The basic idea behind this project is quite simple: keyboard input is converted into musical notes.
 
-This project is licensed under the MIT License.
+**Sound generation:** NumPy is used to generate audio waves. Different waveforms and a decay envelope are used to create the instrument sounds.
 
-<div align="center"> Made with Python & 🎵 by <strong>Pushkar Mishra</strong> </div>
+**Key mapping:** Each letter is assigned a note from a musical scale. Numbers are assigned lower notes.
+
+**Changing the music:** The application checks the keys pressed during the last three seconds. Based on the typing speed, it decides whether to use a major or minor scale.
+
+**Rhythm score:** The time gaps between recent key presses are compared to calculate how consistent the typing rhythm is.
+
+**Saving:** Mido handles MIDI file creation, while Python's built-in `wave` module is used to save the audio as a WAV file.
+
+## 🔧 Things I Would Like to Improve
+
+There are still a few things I would like to add to this project:
+
+- Add drum sounds for Space and Backspace.
+- Allow users to select their own musical scale and key.
+- Improve startup time.
+- Add an option to record and replay a performance.
+- Support symbols and punctuation marks.
+- Make MIDI and WAV note durations match exactly.
+
+## 🤝 Contributing
+
+This project was made as part of my college work. I am still learning and experimenting with Python, so there is always room for improvement.
+
+Suggestions and ideas are welcome!
+
+## 📄 License
+
+This project is available under the MIT License.
+
+---
+
+**Made with Python and a little music 🎵**
+
+**Pushkar Mishra**
