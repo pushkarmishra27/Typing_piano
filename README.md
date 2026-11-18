@@ -8,7 +8,12 @@ You can also change instruments while typing and save your session as MIDI or WA
 
 ## 📸 Screenshots
 
-Screenshots will be added soon.
+## Screenshots
+
+| Idle screen | Live performance (Piano) | Live performance (Saw) |
+|:-----------:|:------------------------:|:----------------------:|
+| ![Idle screen](assets/screenshots/idle.png) | ![Live performance with Piano](assets/screenshots/live-piano.png) | ![Live performance with Saw](assets/screenshots/live-saw.png) |
+| Waiting for the first key | Fast typing switches to Major mode | Switched to the Saw instrument with F4 |
 
 ## ✨ Features
 
